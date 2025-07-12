@@ -13,7 +13,7 @@ HOOP_X = 3.0
 HOOP_Y = 2.0
 
 # 数据生成参数
-NUM_SAMPLES = 50    # 总样本数
+NUM_SAMPLES = 50     # 总样本数
 OUTLIER_RATIO = 0.1  # 异常值比例
 NOISE_LEVEL = 50     # 正常噪声水平 (RPM)
 OUTLIER_NOISE = 400  # 异常值噪声水平 (RPM)
@@ -31,28 +31,29 @@ def generate_shot_data(n_samples, hoop_pos, noise_level, outlier_ratio, outlier_
     x_coords = np.random.uniform(0.5, COURT_WIDTH, n_samples)
     y_coords = np.random.uniform(0.5, COURT_HEIGHT, n_samples)
     
-    # 计算到篮筐的距离和角度
+    # 计算到篮筐的距离
     distances = np.sqrt((x_coords - hoop_pos[0])**2 + (y_coords - hoop_pos[1])**2)
-    angles = np.arctan2(hoop_pos[1]-y_coords, hoop_pos[0]-x_coords)
     
-    # 基础RPM计算公式
-    base_rpm = 1200 + 100 * distances**1.5
-    angle_factor = np.cos(angles)**2  # 角度影响因子
+    # 基础RPM计算公式 - 简化的线性关系，确保距离越远转速越高
+    base_rpm = 1000 + 200 * distances  # 基础转速1000RPM，每米增加200RPM
     
-    # 添加正常噪声
-    rpm_values = base_rpm * angle_factor + np.random.normal(0, noise_level, n_samples)
+    # 添加正常噪声（确保不会产生负值）
+    noise = np.random.normal(0, noise_level, n_samples)
+    rpm_values = np.maximum(base_rpm + noise, 800)  # 设置最低800RPM
     
-    # 添加异常值
+    # 添加异常值（确保不会产生负值）
     if outlier_ratio > 0:
         n_outliers = int(n_samples * outlier_ratio)
         outlier_indices = np.random.choice(n_samples, n_outliers, replace=False)
-        rpm_values[outlier_indices] += np.random.uniform(outlier_noise*0.8, outlier_noise*1.2, n_outliers)
+        outlier_noises = np.random.uniform(outlier_noise*0.8, outlier_noise*1.2, n_outliers)
+        rpm_values[outlier_indices] = np.maximum(rpm_values[outlier_indices] + outlier_noises, 800)
     
     # 创建DataFrame
     data = pd.DataFrame({
         'x': x_coords,
         'y': y_coords,
         'rpm': rpm_values,
+        'distance': distances,  # 添加距离列用于验证
         'hoop_x': hoop_pos[0],  # 记录篮筐位置
         'hoop_y': hoop_pos[1]
     })
@@ -127,6 +128,10 @@ def check_data_quality(data):
     print(f"  y: [{data['y'].min():.2f}, {data['y'].max():.2f}] m")
     print(f"  rpm: [{data['rpm'].min():.0f}, {data['rpm'].max():.0f}] RPM")
     
+    # 检查距离与RPM的关系
+    corr = data['distance'].corr(data['rpm'])
+    print(f"\n距离与RPM的相关系数: {corr:.3f} (应接近正数)")
+    
     # 异常值检测
     z_scores = np.abs(stats.zscore(data['rpm']))
     outliers = data[z_scores > 3]
@@ -142,11 +147,11 @@ def check_data_quality(data):
     plt.title('转速分布')
     
     plt.subplot(122)
-    plt.scatter(data['x'], data['y'], c='blue', alpha=0.5, s=10)
-    plt.scatter(outliers['x'], outliers['y'], c='red', s=30, label='异常值')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('异常值空间分布')
+    plt.scatter(data['distance'], data['rpm'], c='blue', alpha=0.5, s=20, label='正常数据')
+    plt.scatter(outliers['distance'], outliers['rpm'], c='red', s=30, label='异常值')
+    plt.xlabel('距离 (m)')
+    plt.ylabel('RPM')
+    plt.title('距离与RPM关系')
     plt.legend()
     
     plt.tight_layout()
